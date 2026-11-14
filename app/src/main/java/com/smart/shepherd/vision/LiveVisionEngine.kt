@@ -1,27 +1,55 @@
-package com.smart.shepherd.vision
+package com.smart.shepherd.learning
 
-import android.graphics.Bitmap
-import com.smart.shepherd.core.RuntimePolicy
+import android.content.Context
 import com.smart.shepherd.core.ModelKind
+import org.json.JSONObject
+import java.io.File
 
-class LiveVisionEngine(private val detector: SheepDetector) {
-    private val policy = RuntimePolicy()
+class ModelRegistry(context: Context) {
 
-    fun analyze(bitmap: Bitmap): LiveVisionResult {
-        val detections = detector.detect(bitmap)
-        val tracked = tracker.update(detections)
-        val parts = if (policy.shouldRun(ModelKind.PARTS, tracked.size)) emptyList<PartObservation>() else emptyList()
-        val behaviors = if (policy.shouldRun(ModelKind.BEHAVIOR, tracked.size)) emptyList<BehaviorObservation>() else emptyList()
-        return LiveVisionResult(tracked, parts, behaviors)
+    private val root =
+        File(context.filesDir, "model_registry").apply {
+            mkdirs()
+        }
+
+    private val activeFile =
+        File(root, "active.json")
+
+    fun active(kind: ModelKind): String? {
+        if (!activeFile.exists()) {
+            return null
+        }
+
+        return try {
+            JSONObject(activeFile.readText())
+                .optString(kind.name)
+                .takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            null
+        }
     }
 
-    private val tracker = SheepTracker()
-}
+    fun activate(
+        kind: ModelKind,
+        modelId: String
+    ) {
+        val json =
+            if (activeFile.exists()) {
+                JSONObject(activeFile.readText())
+            } else {
+                JSONObject()
+            }
 
-data class PartObservation(val trackId: Long, val part: String, val confidence: Float)
-data class BehaviorObservation(val trackId: Long, val behavior: String, val confidence: Float)
-data class LiveVisionResult(
-    val tracked: List<TrackedSheep>,
-    val parts: List<PartObservation>,
-    val behaviors: List<BehaviorObservation>
-)
+        json.put(kind.name, modelId)
+        activeFile.writeText(json.toString())
+    }
+
+    fun versions(): List<String> {
+        return root.listFiles()
+            ?.filter {
+                it.isFile && it.extension.equals("tflite", ignoreCase = true)
+            }
+            ?.map { it.name }
+            ?: emptyList()
+    }
+}
