@@ -1,4 +1,4 @@
-name: Smart Shepherd - Emulator Test
+name: Smart Shepherd - Replace Project And Test
 
 on:
   workflow_dispatch:
@@ -10,13 +10,199 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
 
-  emulator-test:
+  replace-project:
+    name: Replace Old Project With SmartShepherd-AI-v0.3
+    runs-on: ubuntu-24.04
+
+    # مهم:
+    # لا نشغّل هذه الخطوة على Pull Request حتى لا نحاول الكتابة إلى فرع PR.
+    if: github.event_name != 'pull_request'
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install unzip
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip
+
+      - name: Check ZIP
+        run: |
+          set -e
+
+          ZIP="SmartShepherd-AI-v0.3.zip"
+
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: $ZIP was not found in repository root."
+            exit 1
+          fi
+
+          echo "ZIP found:"
+          ls -lh "$ZIP"
+
+      - name: Extract New Project
+        run: |
+          set -e
+
+          ZIP="SmartShepherd-AI-v0.3.zip"
+          TEMP_DIR="$RUNNER_TEMP/smart_shepherd_new"
+
+          rm -rf "$TEMP_DIR"
+          mkdir -p "$TEMP_DIR"
+
+          unzip -q "$ZIP" -d "$TEMP_DIR"
+
+          echo "================================"
+          echo "EXTRACTED ZIP CONTENTS"
+          echo "================================"
+
+          find "$TEMP_DIR" -maxdepth 3 -type f | sort
+
+      - name: Detect Project Root
+        run: |
+          set -e
+
+          TEMP_DIR="$RUNNER_TEMP/smart_shepherd_new"
+
+          # إذا كان ZIP يحتوي مجلداً رئيسياً SmartShepherd-AI-v0.3
+          if [ -d "$TEMP_DIR/SmartShepherd-AI-v0.3" ]; then
+            PROJECT_ROOT="$TEMP_DIR/SmartShepherd-AI-v0.3"
+
+          # إذا كان ZIP يحتوي مجلد app مباشرة
+          elif [ -d "$TEMP_DIR/app" ]; then
+            PROJECT_ROOT="$TEMP_DIR"
+
+          else
+            echo "ERROR: Could not detect Android project root."
+
+            echo "Directories:"
+            find "$TEMP_DIR" -maxdepth 2 -type d | sort
+
+            exit 1
+          fi
+
+          echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
+
+          echo "Project root:"
+          echo "$PROJECT_ROOT"
+
+      - name: Verify New Project
+        run: |
+          set -e
+
+          echo "Checking Android project..."
+
+          if [ ! -d "$PROJECT_ROOT/app" ]; then
+            echo "ERROR: app directory not found."
+            exit 1
+          fi
+
+          if [ ! -f "$PROJECT_ROOT/settings.gradle" ] &&
+             [ ! -f "$PROJECT_ROOT/settings.gradle.kts" ]; then
+            echo "ERROR: settings.gradle/settings.gradle.kts not found."
+            exit 1
+          fi
+
+          if [ ! -f "$PROJECT_ROOT/build.gradle" ] &&
+             [ ! -f "$PROJECT_ROOT/build.gradle.kts" ]; then
+            echo "ERROR: root Gradle build file not found."
+            exit 1
+          fi
+
+          if [ ! -f "$PROJECT_ROOT/app/src/main/assets/models/sheep_detector.tflite" ]; then
+            echo "ERROR: bundled sheep detector model not found."
+            exit 1
+          fi
+
+          echo "================================"
+          echo "NEW PROJECT VERIFIED"
+          echo "================================"
+
+          du -h \
+            "$PROJECT_ROOT/app/src/main/assets/models/sheep_detector.tflite"
+
+      - name: Remove Old Project Files
+        run: |
+          set -e
+
+          echo "================================"
+          echo "REMOVING OLD PROJECT"
+          echo "================================"
+
+          # نحذف ملفات المشروع القديمة من working tree
+          # مع إبقاء مجلد .git حتى لا نفقد تاريخ المستودع.
+          find . -mindepth 1 -maxdepth 1 \
+            ! -name ".git" \
+            ! -name "SmartShepherd-AI-v0.3.zip" \
+            -exec rm -rf {} +
+
+          echo "Old project removed."
+
+      - name: Copy New Project Into Repository
+        run: |
+          set -e
+
+          echo "================================"
+          echo "INSTALLING NEW PROJECT"
+          echo "================================"
+
+          cp -a "$PROJECT_ROOT"/. .
+
+          echo "New project copied."
+
+      - name: Remove Replacement ZIP
+        run: |
+          # لا نحتاج إبقاء ZIP داخل المشروع النهائي.
+          rm -f "SmartShepherd-AI-v0.3.zip"
+
+      - name: Show New Repository Structure
+        run: |
+          echo "================================"
+          echo "NEW REPOSITORY STRUCTURE"
+          echo "================================"
+
+          find . \
+            -path "./.git" -prune -o \
+            -type f -print \
+            | sort \
+            | head -300
+
+      - name: Commit And Push New Project
+        run: |
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No changes detected."
+            exit 0
+          fi
+
+          git commit -m "Replace project with SmartShepherd-AI-v0.3"
+
+          git push origin HEAD:main
+
+  build-and-test:
     name: Build And Test On Emulator
     runs-on: ubuntu-24.04
+
+    # لا نبدأ الاختبار إلا بعد استبدال المشروع.
+    needs: replace-project
+
+    if: |
+      always() &&
+      (github.event_name == 'pull_request' || needs.replace-project.result == 'success')
 
     steps:
 
@@ -40,6 +226,20 @@ jobs:
           accept-android-sdk-licenses: true
           log-accepted-android-sdk-licenses: true
           packages: platform-tools
+
+      - name: Verify Bundled Detector Model
+        run: |
+          set -e
+
+          MODEL="app/src/main/assets/models/sheep_detector.tflite"
+
+          if [ ! -f "$MODEL" ]; then
+            echo "ERROR: Detector model is missing."
+            exit 1
+          fi
+
+          echo "Detector model:"
+          ls -lh "$MODEL"
 
       - name: Run Unit Tests
         run: gradle testDebugUnitTest --stacktrace
