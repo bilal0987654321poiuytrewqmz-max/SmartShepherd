@@ -27,24 +27,17 @@ jobs:
           fi
 
           echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
-          echo "Found: $ZIP_FILE"
 
-      - name: Extract into temporary directory
+      - name: Extract ZIP
         run: |
           mkdir -p /tmp/shepherd_extract
           unzip -o "$ZIP_FILE" -d /tmp/shepherd_extract
 
-      - name: Find Android project root
+      - name: Find project root
         run: |
           PROJECT_ROOT=$(find /tmp/shepherd_extract \
             -type f -name "settings.gradle.kts" \
             -printf '%h\n' | head -n 1)
-
-          if [ -z "$PROJECT_ROOT" ]; then
-            PROJECT_ROOT=$(find /tmp/shepherd_extract \
-              -type f -name "settings.gradle" \
-              -printf '%h\n' | head -n 1)
-          fi
 
           if [ -z "$PROJECT_ROOT" ]; then
             echo "Gradle project not found!"
@@ -53,27 +46,31 @@ jobs:
 
           echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
 
-      - name: Copy project into original repository root
+      - name: Copy project files
         run: |
           sudo apt-get update
           sudo apt-get install -y rsync
 
           rsync -av "$PROJECT_ROOT/" ./ \
             --exclude='.git/' \
-            --exclude='.github/workflows/unzip-project.yml'
+            --exclude='.github/workflows/unzip-project.yml' \
+            --exclude='.github/workflows/android.yml'
 
-      - name: Verify root project
+      - name: Verify project
         run: |
           test -d app
-          test -f settings.gradle.kts -o -f settings.gradle
-          echo "Project files are now in repository root!"
-          ls -la
+          test -f settings.gradle.kts
+          echo "Project successfully extracted to root!"
 
-      - name: Commit changes
+      - name: Remove old extracted folder
+        run: |
+          rm -rf extracted
+
+      - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add -A
-          git commit -m "Move Smart Shepherd project to repository root" || echo "No changes"
+          git commit -m "Install Smart Shepherd Phase 2 in repository root" || echo "No changes"
           git push
