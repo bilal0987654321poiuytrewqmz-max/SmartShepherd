@@ -43,6 +43,6 @@ class SheepDetector(context: Context) : AutoCloseable {
     override fun close() = detector.close()
 
     companion object {
-        const val MODEL_FILE = "sheep_detector.tflite"
+        const val MODEL_FILE = "models/sheep_detector.tflite"
     }
 }

@@ -98,7 +98,7 @@
             android:id="@+id/assistantMessage"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="المساعد جاهز. ثبّت نموذج الرؤية لتفعيل اكتشاف الأغنام."
+            android:text="الكشف المحلي يعمل. Gemini مشرف سحابي عند الطلب، والتدريب/البيانات تبقى تحت سيطرة التطبيق."
             android:textColor="#FFFFFF"
             android:textSize="13sp"
             android:paddingBottom="10dp" />
@@ -107,6 +107,19 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal">
+            <Button
+                android:id="@+id/btnSupervisor"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="المشرف" />
+            <Button
+                android:id="@+id/btnSaveSample"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:text="عينة" />
             <Button
                 android:id="@+id/btnGemini"
                 android:layout_width="0dp"

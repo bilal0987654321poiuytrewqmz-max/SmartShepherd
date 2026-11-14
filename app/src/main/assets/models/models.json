@@ -1,0 +1,7 @@
+{
+  "detector": {"id":"sheep_detector_v1","file":"models/sheep_detector.tflite","size_target_mb":"~4.6","status":"bundled"},
+  "reid": {"id":"sheep_reid_v1","file":null,"size_target_mb":"2-5","status":"planned"},
+  "parts": {"id":"sheep_parts_v1","file":null,"size_target_mb":"3-7","status":"planned"},
+  "attributes": {"id":"sheep_attributes_v1","file":null,"size_target_mb":"2-4","status":"planned"},
+  "behavior": {"id":"sheep_behavior_v1","file":null,"size_target_mb":"1-3","status":"planned"}
+}
