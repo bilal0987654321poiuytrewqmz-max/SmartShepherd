@@ -9,8 +9,12 @@ on:
     branches:
       - main
 
+# نحتاج الكتابة على الملفات ودفع التغييرات إلى main.
+# workflows: write مهم لأن المشروع الجديد قد يحتوي
+# على ملفات داخل .github/workflows/
 permissions:
   contents: write
+  workflows: write
 
 jobs:
 
@@ -18,8 +22,7 @@ jobs:
     name: Replace Old Project With SmartShepherd-AI-v0.3
     runs-on: ubuntu-24.04
 
-    # مهم:
-    # لا نشغّل هذه الخطوة على Pull Request حتى لا نحاول الكتابة إلى فرع PR.
+    # لا نعدل المستودع من Pull Request.
     if: github.event_name != 'pull_request'
 
     steps:
@@ -31,6 +34,8 @@ jobs:
 
       - name: Install unzip
         run: |
+          set -e
+
           sudo apt-get update
           sudo apt-get install -y unzip
 
@@ -45,7 +50,10 @@ jobs:
             exit 1
           fi
 
-          echo "ZIP found:"
+          echo "================================"
+          echo "ZIP FOUND"
+          echo "================================"
+
           ls -lh "$ZIP"
 
       - name: Extract New Project
@@ -64,7 +72,10 @@ jobs:
           echo "EXTRACTED ZIP CONTENTS"
           echo "================================"
 
-          find "$TEMP_DIR" -maxdepth 3 -type f | sort
+          find "$TEMP_DIR" \
+            -maxdepth 3 \
+            -type f \
+            | sort
 
       - name: Detect Project Root
         run: |
@@ -72,33 +83,46 @@ jobs:
 
           TEMP_DIR="$RUNNER_TEMP/smart_shepherd_new"
 
-          # إذا كان ZIP يحتوي مجلداً رئيسياً SmartShepherd-AI-v0.3
+          # الحالة الأولى:
+          # ZIP يحتوي مجلد SmartShepherd-AI-v0.3
           if [ -d "$TEMP_DIR/SmartShepherd-AI-v0.3" ]; then
+
             PROJECT_ROOT="$TEMP_DIR/SmartShepherd-AI-v0.3"
 
-          # إذا كان ZIP يحتوي مجلد app مباشرة
+          # الحالة الثانية:
+          # ZIP يحتوي app مباشرة
           elif [ -d "$TEMP_DIR/app" ]; then
+
             PROJECT_ROOT="$TEMP_DIR"
 
           else
+
             echo "ERROR: Could not detect Android project root."
 
-            echo "Directories:"
-            find "$TEMP_DIR" -maxdepth 2 -type d | sort
+            find "$TEMP_DIR" \
+              -maxdepth 3 \
+              -type d \
+              | sort
 
             exit 1
+
           fi
 
           echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
 
-          echo "Project root:"
+          echo "================================"
+          echo "PROJECT ROOT"
+          echo "================================"
+
           echo "$PROJECT_ROOT"
 
       - name: Verify New Project
         run: |
           set -e
 
-          echo "Checking Android project..."
+          echo "================================"
+          echo "VERIFYING NEW PROJECT"
+          echo "================================"
 
           if [ ! -d "$PROJECT_ROOT/app" ]; then
             echo "ERROR: app directory not found."
@@ -122,11 +146,13 @@ jobs:
             exit 1
           fi
 
-          echo "================================"
-          echo "NEW PROJECT VERIFIED"
-          echo "================================"
+          echo ""
+          echo "New Android project verified."
 
-          du -h \
+          echo ""
+          echo "Detector model:"
+
+          ls -lh \
             "$PROJECT_ROOT/app/src/main/assets/models/sheep_detector.tflite"
 
       - name: Remove Old Project Files
@@ -134,54 +160,107 @@ jobs:
           set -e
 
           echo "================================"
-          echo "REMOVING OLD PROJECT"
+          echo "REMOVING OLD PROJECT FILES"
           echo "================================"
 
-          # نحذف ملفات المشروع القديمة من working tree
-          # مع إبقاء مجلد .git حتى لا نفقد تاريخ المستودع.
-          find . -mindepth 1 -maxdepth 1 \
+          # مهم جداً:
+          #
+          # لا نحذف:
+          # .git
+          #
+          # لأن .git يحتوي تاريخ المستودع
+          # وبيانات GitHub.
+          #
+          # كذلك لا نحذف ZIP الآن لأنه مصدر المشروع الجديد.
+
+          find . \
+            -mindepth 1 \
+            -maxdepth 1 \
             ! -name ".git" \
             ! -name "SmartShepherd-AI-v0.3.zip" \
             -exec rm -rf {} +
 
-          echo "Old project removed."
+          echo ""
+          echo "Old project files removed."
+
+          echo ""
+          echo "Git directory preserved."
 
       - name: Copy New Project Into Repository
         run: |
           set -e
 
           echo "================================"
-          echo "INSTALLING NEW PROJECT"
+          echo "COPYING NEW PROJECT"
           echo "================================"
+
+          # نسخ كل محتويات المشروع الجديد
+          # بما فيها .github/workflows إذا كانت موجودة.
+          #
+          # هذا يعني أن ملفات المشروع القديمة التي تم حذفها
+          # ستختفي، والملفات الجديدة ستصبح هي الموجودة.
 
           cp -a "$PROJECT_ROOT"/. .
 
-          echo "New project copied."
+          echo ""
+          echo "New project copied successfully."
 
       - name: Remove Replacement ZIP
         run: |
-          # لا نحتاج إبقاء ZIP داخل المشروع النهائي.
+          set -e
+
+          # الـ ZIP كان مجرد وسيلة لنقل المشروع.
+          # لا نريده داخل المشروع النهائي.
           rm -f "SmartShepherd-AI-v0.3.zip"
 
-      - name: Show New Repository Structure
+          echo "Replacement ZIP removed from repository."
+
+      - name: Verify Final Repository
         run: |
+          set -e
+
           echo "================================"
-          echo "NEW REPOSITORY STRUCTURE"
+          echo "FINAL PROJECT CHECK"
           echo "================================"
 
-          find . \
-            -path "./.git" -prune -o \
-            -type f -print \
-            | sort \
-            | head -300
+          if [ ! -d "app" ]; then
+            echo "ERROR: Final app directory is missing."
+            exit 1
+          fi
+
+          if [ ! -f "app/src/main/assets/models/sheep_detector.tflite" ]; then
+            echo "ERROR: Final detector model is missing."
+            exit 1
+          fi
+
+          echo ""
+          echo "Final detector model:"
+
+          ls -lh \
+            "app/src/main/assets/models/sheep_detector.tflite"
+
+          echo ""
+          echo "================================"
+          echo "FINAL GIT STATUS"
+          echo "================================"
+
+          git status --short
 
       - name: Commit And Push New Project
         run: |
           set -e
 
+          echo "================================"
+          echo "COMMIT AND PUSH"
+          echo "================================"
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          # يضيف كل التغييرات:
+          # الملفات الجديدة
+          # الملفات المعدلة
+          # الملفات المحذوفة
           git add -A
 
           if git diff --cached --quiet; then
@@ -189,20 +268,33 @@ jobs:
             exit 0
           fi
 
-          git commit -m "Replace project with SmartShepherd-AI-v0.3"
+          echo ""
+          echo "Changes to be committed:"
+
+          git diff --cached --stat
+
+          git commit \
+            -m "Replace project with SmartShepherd-AI-v0.3"
 
           git push origin HEAD:main
+
+          echo ""
+          echo "================================"
+          echo "PROJECT REPLACED SUCCESSFULLY"
+          echo "================================"
 
   build-and-test:
     name: Build And Test On Emulator
     runs-on: ubuntu-24.04
 
-    # لا نبدأ الاختبار إلا بعد استبدال المشروع.
     needs: replace-project
 
     if: |
       always() &&
-      (github.event_name == 'pull_request' || needs.replace-project.result == 'success')
+      (
+        github.event_name == 'pull_request' ||
+        needs.replace-project.result == 'success'
+      )
 
     steps:
 
@@ -306,7 +398,9 @@ jobs:
             echo "================================"
 
             AAPT=$(find "$ANDROID_HOME/build-tools" \
-              -type f -name aapt | sort -V | tail -n 1)
+              -type f -name aapt \
+              | sort -V \
+              | tail -n 1)
 
             if [ -z "$AAPT" ]; then
               echo "ERROR: AAPT not found."
@@ -337,12 +431,15 @@ jobs:
             echo "CHECKING APPLICATION PROCESS"
             echo "================================"
 
-            APP_PID=$(adb shell pidof -s "$PACKAGE_NAME" | tr -d '\r')
+            APP_PID=$(adb shell pidof -s "$PACKAGE_NAME" \
+              | tr -d '\r')
 
             if [ -z "$APP_PID" ]; then
+
               echo "ERROR: Application process is not running."
 
-              adb logcat -d -t 2000 > emulator-logcat.txt
+              adb logcat -d -t 2000 \
+                > emulator-logcat.txt
 
               exit 1
             fi
@@ -357,9 +454,12 @@ jobs:
             adb logcat -d > full-logcat.txt
 
             if grep -q "FATAL EXCEPTION" full-logcat.txt; then
+
               echo "ERROR: Fatal exception detected."
 
-              grep -A 80 -B 10 "FATAL EXCEPTION" full-logcat.txt
+              grep -A 80 -B 10 \
+                "FATAL EXCEPTION" \
+                full-logcat.txt
 
               exit 1
             fi
