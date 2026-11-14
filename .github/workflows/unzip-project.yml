@@ -15,28 +15,40 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install unzip
-        run: sudo apt-get update && sudo apt-get install -y unzip
-
       - name: Find ZIP file
+        id: findzip
         run: |
-          ZIP_FILE=$(find source -maxdepth 1 -name "*.zip" -print -quit)
+          ZIP_FILE=$(find . -type f -iname "*.zip" \
+            ! -path "./.git/*" \
+            ! -path "./extracted/*" \
+            -print -quit)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP file found in source/"
+            echo "ERROR: No ZIP file found in repository"
+            echo "Upload your ZIP file to the repository first."
             exit 1
           fi
 
           echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
+          echo "Found: $ZIP_FILE"
 
-      - name: Extract project
+      - name: Extract ZIP
         run: |
           mkdir -p extracted
           unzip -o "$ZIP_FILE" -d extracted
 
-      - name: Show extracted files
+      - name: Verify extracted project
         run: |
-          find extracted -maxdepth 4 -type f | sort
+          echo "===== EXTRACTED FILES ====="
+          find extracted -maxdepth 5 -type f | sort
+
+          echo "===== PROJECT CHECK ====="
+          if find extracted -name "settings.gradle" \
+            -o -name "settings.gradle.kts" | grep -q .; then
+            echo "Android Gradle project found!"
+          else
+            echo "WARNING: Gradle settings file not found."
+          fi
 
       - name: Commit extracted files
         run: |
@@ -44,5 +56,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add extracted
-          git commit -m "Extract Smart Shepherd Phase 2 project" || echo "No changes"
+          git commit -m "Extract Smart Shepherd Phase 2"
           git push
