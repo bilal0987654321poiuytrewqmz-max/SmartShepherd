@@ -1,6 +1,3 @@
-
-import java.net.URL
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -14,8 +11,9 @@ android {
         applicationId = "com.smart.shepherd"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+
+        versionCode = 3
+        versionName = "0.3.0"
     }
 
     buildFeatures {
@@ -33,11 +31,16 @@ android {
 }
 
 dependencies {
+
+    // Android
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
+
+    // Material / UI
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.constraintlayout:constraintlayout:2.2.0")
 
+    // CameraX
     val cameraX = "1.4.1"
 
     implementation("androidx.camera:camera-core:$cameraX")
@@ -45,13 +48,17 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:$cameraX")
     implementation("androidx.camera:camera-view:$cameraX")
 
+    // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // Networking / JSON
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.11.0")
+
+    // Secure local storage
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     // TensorFlow Lite
     implementation("org.tensorflow:tensorflow-lite:2.13.0")
     implementation("org.tensorflow:tensorflow-lite-task-vision:0.4.4")
 }
-
