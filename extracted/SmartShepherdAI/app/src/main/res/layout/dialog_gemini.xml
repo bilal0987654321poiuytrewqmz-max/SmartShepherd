@@ -1,0 +1,16 @@
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="20dp">
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="مفتاح Gemini API" android:textStyle="bold" android:textSize="18sp"/>
+        <EditText android:id="@+id/apiKeyInput" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:hint="ألصق المفتاح هنا"
+            android:inputType="textPassword" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" android:textSize="12sp"
+            android:text="يُستخدم Gemini لتحليل اللقطات والإرشاد. لا ترسل الفيديو الحي باستمرار. مفتاح API داخل تطبيق عميل يمكن استخراجه؛ استخدم مفتاحاً مخصصاً محدود الصلاحيات وراقب حصته."/>
+        <EditText android:id="@+id/geminiQuestion" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:hint="اسأل المساعد عن لقطة الكاميرا" />
+    </LinearLayout>
+</ScrollView>
