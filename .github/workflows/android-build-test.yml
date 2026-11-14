@@ -30,12 +30,9 @@ jobs:
       - name: Verify Project Structure
         shell: bash
         run: |
-          echo "Checking project files..."
-
           test -d app
           test -f settings.gradle.kts
           test -f app/build.gradle.kts
-
           echo "Project structure is valid."
 
       - name: Setup Java 17
@@ -63,12 +60,10 @@ jobs:
           adb version
 
       - name: Run Unit Tests
-        run: |
-          gradle testDebugUnitTest --stacktrace
+        run: gradle testDebugUnitTest --stacktrace
 
       - name: Build Debug APK
-        run: |
-          gradle assembleDebug --stacktrace
+        run: gradle assembleDebug --stacktrace
 
       - name: Verify APK
         shell: bash
@@ -107,8 +102,8 @@ jobs:
   # ==========================================
 
   emulator-test:
-    name: Install And Run On Android Emulator
-    runs-on: ubuntu-latest
+    name: Android Emulator Test
+    runs-on: ubuntu-24.04
     needs: build
 
     steps:
@@ -118,17 +113,32 @@ jobs:
           name: SmartShepherd-Debug-APK
           path: artifacts
 
+      - name: Verify Downloaded APK
+        shell: bash
+        run: |
+          if [ ! -f "artifacts/app-debug.apk" ]; then
+            echo "ERROR: APK not found."
+            exit 1
+          fi
+
+          ls -lh artifacts/app-debug.apk
+
       - name: Start Android Emulator And Test App
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 34
           target: google_apis
           arch: x86_64
           profile: pixel_2
+
           cores: 2
-          ram-size: 2048M
+          ram-size: 3072M
           heap-size: 512M
+
+          emulator-boot-timeout: 900
           disable-animations: true
+          disable-linux-hw-accel: auto
+
           script: |
             set -e
 
@@ -138,12 +148,11 @@ jobs:
 
             APK="artifacts/app-debug.apk"
 
-            if [ ! -f "$APK" ]; then
-              echo "ERROR: APK file not found."
-              exit 1
-            fi
+            echo "Waiting for Android device..."
+            adb wait-for-device
 
-            echo "APK found."
+            echo "Checking Android boot..."
+            adb shell getprop sys.boot_completed
 
             echo "Searching for AAPT..."
 
@@ -190,7 +199,7 @@ jobs:
 
             if [ -z "$APP_PID" ]; then
               echo "ERROR: Application process is not running."
-              adb logcat -d -t 500 > emulator-logcat.txt
+              adb logcat -d -t 1000 > emulator-logcat.txt
               exit 1
             fi
 
@@ -211,12 +220,12 @@ jobs:
 
             echo "No fatal exception detected."
 
+            adb shell dumpsys activity activities \
+              > emulator-activities.txt
+
             echo "================================"
             echo "EMULATOR TEST PASSED"
             echo "================================"
-
-            adb shell dumpsys activity activities \
-              > emulator-activities.txt
 
       - name: Upload Emulator Logs
         if: always()
