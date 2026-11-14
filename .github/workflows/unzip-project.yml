@@ -1,76 +1,187 @@
-
-name: Extract Smart Shepherd To Repository Root
+name: Smart Shepherd - Build And Emulator Test
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: smart-shepherd-build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  extract:
+
+  build:
+    name: Build APK And Run Unit Tests
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Find ZIP
+      - name: Verify Android Project
         run: |
-          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*.zip" \
-            ! -path "./.git/*" \
-            -print -quit)
+          echo "===== PROJECT STRUCTURE ====="
 
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ZIP file not found!"
-            exit 1
-          fi
-
-          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
-
-      - name: Extract ZIP
-        run: |
-          mkdir -p /tmp/shepherd_extract
-          unzip -o "$ZIP_FILE" -d /tmp/shepherd_extract
-
-      - name: Find project root
-        run: |
-          PROJECT_ROOT=$(find /tmp/shepherd_extract \
-            -type f -name "settings.gradle.kts" \
-            -printf '%h\n' | head -n 1)
-
-          if [ -z "$PROJECT_ROOT" ]; then
-            echo "Gradle project not found!"
-            exit 1
-          fi
-
-          echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
-
-      - name: Copy project files
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y rsync
-
-          rsync -av "$PROJECT_ROOT/" ./ \
-            --exclude='.git/' \
-            --exclude='.github/workflows/unzip-project.yml' \
-            --exclude='.github/workflows/android.yml'
-
-      - name: Verify project
-        run: |
           test -d app
-          test -f settings.gradle.kts
-          echo "Project successfully extracted to root!"
+          test -f settings.gradle.kts || test -f settings.gradle
+          test -f app/build.gradle.kts || test -f app/build.gradle
 
-      - name: Remove old extracted folder
+          echo "Project structure verified."
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Check Gradle
         run: |
-          rm -rf extracted
+          gradle --version
 
-      - name: Commit and push
+      - name: Android Unit Tests
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          gradle testDebugUnitTest
 
-          git add -A
-          git commit -m "Install Smart Shepherd Phase 2 in repository root" || echo "No changes"
-          git push
+      - name: Build Debug APK
+        run: |
+          gradle assembleDebug
+
+      - name: Verify APK
+        run: |
+          APK=$(find app/build/outputs/apk/debug \
+            -type f -name "*.apk" | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "APK NOT FOUND!"
+            exit 1
+          fi
+
+          echo "APK=$APK" >> "$GITHUB_ENV"
+
+          echo "===== APK INFORMATION ====="
+          ls -lh "$APK"
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartShepherd-Debug-APK
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload Build Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartShepherd-Build-Reports
+          path: |
+            app/build/reports/
+            app/build/test-results/
+          if-no-files-found: ignore
+
+  emulator-test:
+    name: Install And Test On Android Emulator
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build APK For Emulator
+        run: |
+          gradle assembleDebug
+
+      - name: Start Android Emulator And Test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_2
+          ram-size: 2048M
+          heap-size: 512M
+          disable-animations: true
+          script: |
+            set -e
+
+            echo "===== WAIT FOR ANDROID ====="
+            adb wait-for-device
+
+            adb shell getprop sys.boot_completed
+
+            echo "===== INSTALL APK ====="
+            APK=$(find app/build/outputs/apk/debug \
+              -type f -name "*.apk" | head -n 1)
+
+            test -n "$APK"
+            adb install -r "$APK"
+
+            echo "===== FIND APPLICATION ID ====="
+            APP_ID=$(grep -m1 'applicationId' app/build.gradle.kts \
+              | sed -E 's/.*applicationId[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
+
+            if [ -z "$APP_ID" ]; then
+              echo "Could not read applicationId."
+              exit 1
+            fi
+
+            echo "Application ID: $APP_ID"
+
+            echo "===== LAUNCH APPLICATION ====="
+            adb shell monkey -p "$APP_ID" \
+              -c android.intent.category.LAUNCHER 1
+
+            sleep 15
+
+            echo "===== CHECK APPLICATION PROCESS ====="
+            adb shell pidof "$APP_ID"
+
+            echo "===== CHECK CRASH LOGS ====="
+            adb logcat -d -t 5000 > emulator-logcat.txt
+
+            if grep -E \
+              "FATAL EXCEPTION|Fatal signal|Process .* has died" \
+              emulator-logcat.txt; then
+              echo "APPLICATION CRASH DETECTED"
+              exit 1
+            fi
+
+            echo "APPLICATION LAUNCH TEST PASSED"
+
+      - name: Upload Emulator Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartShepherd-Emulator-Logs
+          path: emulator-logcat.txt
+          if-no-files-found: ignore
