@@ -1,5 +1,5 @@
 
-name: Extract Smart Shepherd Project
+name: Extract Smart Shepherd To Repository Root
 
 on:
   workflow_dispatch:
@@ -15,46 +15,65 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Find ZIP file
-        id: findzip
+      - name: Find ZIP
         run: |
-          ZIP_FILE=$(find . -type f -iname "*.zip" \
+          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*.zip" \
             ! -path "./.git/*" \
-            ! -path "./extracted/*" \
             -print -quit)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP file found in repository"
-            echo "Upload your ZIP file to the repository first."
+            echo "ZIP file not found!"
             exit 1
           fi
 
           echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
           echo "Found: $ZIP_FILE"
 
-      - name: Extract ZIP
+      - name: Extract into temporary directory
         run: |
-          mkdir -p extracted
-          unzip -o "$ZIP_FILE" -d extracted
+          mkdir -p /tmp/shepherd_extract
+          unzip -o "$ZIP_FILE" -d /tmp/shepherd_extract
 
-      - name: Verify extracted project
+      - name: Find Android project root
         run: |
-          echo "===== EXTRACTED FILES ====="
-          find extracted -maxdepth 5 -type f | sort
+          PROJECT_ROOT=$(find /tmp/shepherd_extract \
+            -type f -name "settings.gradle.kts" \
+            -printf '%h\n' | head -n 1)
 
-          echo "===== PROJECT CHECK ====="
-          if find extracted -name "settings.gradle" \
-            -o -name "settings.gradle.kts" | grep -q .; then
-            echo "Android Gradle project found!"
-          else
-            echo "WARNING: Gradle settings file not found."
+          if [ -z "$PROJECT_ROOT" ]; then
+            PROJECT_ROOT=$(find /tmp/shepherd_extract \
+              -type f -name "settings.gradle" \
+              -printf '%h\n' | head -n 1)
           fi
 
-      - name: Commit extracted files
+          if [ -z "$PROJECT_ROOT" ]; then
+            echo "Gradle project not found!"
+            exit 1
+          fi
+
+          echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
+
+      - name: Copy project into original repository root
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rsync
+
+          rsync -av "$PROJECT_ROOT/" ./ \
+            --exclude='.git/' \
+            --exclude='.github/workflows/unzip-project.yml'
+
+      - name: Verify root project
+        run: |
+          test -d app
+          test -f settings.gradle.kts -o -f settings.gradle
+          echo "Project files are now in repository root!"
+          ls -la
+
+      - name: Commit changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add extracted
-          git commit -m "Extract Smart Shepherd Phase 2"
+          git add -A
+          git commit -m "Move Smart Shepherd project to repository root" || echo "No changes"
           git push
