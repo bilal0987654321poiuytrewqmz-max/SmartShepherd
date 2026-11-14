@@ -1,5 +1,4 @@
-
-name: Smart Shepherd - Build And Emulator Test
+name: Smart Shepherd - Emulator Test
 
 on:
   workflow_dispatch:
@@ -15,25 +14,14 @@ permissions:
 
 jobs:
 
-  # ==========================================
-  # JOB 1: BUILD AND UNIT TESTS
-  # ==========================================
-
-  build:
-    name: Build Android App
-    runs-on: ubuntu-latest
+  emulator-test:
+    name: Build And Test On Emulator
+    runs-on: ubuntu-24.04
 
     steps:
+
       - name: Checkout Repository
         uses: actions/checkout@v4
-
-      - name: Verify Project Structure
-        shell: bash
-        run: |
-          test -d app
-          test -f settings.gradle.kts
-          test -f app/build.gradle.kts
-          echo "Project structure is valid."
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -53,77 +41,13 @@ jobs:
           log-accepted-android-sdk-licenses: true
           packages: platform-tools
 
-      - name: Show Build Environment
-        run: |
-          java -version
-          gradle --version
-          adb version
-
       - name: Run Unit Tests
         run: gradle testDebugUnitTest --stacktrace
 
-      - name: Build Debug APK
+      - name: Build APK For Emulator
         run: gradle assembleDebug --stacktrace
 
-      - name: Verify APK
-        shell: bash
-        run: |
-          APK="app/build/outputs/apk/debug/app-debug.apk"
-
-          if [ ! -f "$APK" ]; then
-            echo "ERROR: APK was not generated."
-            exit 1
-          fi
-
-          echo "APK successfully generated."
-          ls -lh "$APK"
-
-      - name: Upload Debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: SmartShepherd-Debug-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload Build Reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: SmartShepherd-Build-Reports
-          path: |
-            **/build/reports/tests/
-            **/build/outputs/logs/
-          if-no-files-found: ignore
-          retention-days: 7
-
-  # ==========================================
-  # JOB 2: ANDROID EMULATOR TEST
-  # ==========================================
-
-  emulator-test:
-    name: Android Emulator Test
-    runs-on: ubuntu-24.04
-    needs: build
-
-    steps:
-      - name: Download APK
-        uses: actions/download-artifact@v4
-        with:
-          name: SmartShepherd-Debug-APK
-          path: artifacts
-
-      - name: Verify Downloaded APK
-        shell: bash
-        run: |
-          if [ ! -f "artifacts/app-debug.apk" ]; then
-            echo "ERROR: APK not found."
-            exit 1
-          fi
-
-          ls -lh artifacts/app-debug.apk
-
-      - name: Start Android Emulator And Test App
+      - name: Start Emulator And Test App
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -135,7 +59,7 @@ jobs:
           ram-size: 3072M
           heap-size: 512M
 
-          emulator-boot-timeout: 900
+          emulator-boot-timeout: 600
           disable-animations: true
           disable-linux-hw-accel: auto
 
@@ -143,18 +67,43 @@ jobs:
             set -e
 
             echo "================================"
-            echo "ANDROID EMULATOR TEST"
+            echo "SMART SHEPHERD EMULATOR TEST"
             echo "================================"
 
-            APK="artifacts/app-debug.apk"
+            APK="app/build/outputs/apk/debug/app-debug.apk"
+
+            if [ ! -f "$APK" ]; then
+              echo "ERROR: APK was not generated."
+              exit 1
+            fi
+
+            echo "APK ready for testing."
 
             echo "Waiting for Android device..."
             adb wait-for-device
 
-            echo "Checking Android boot..."
-            adb shell getprop sys.boot_completed
+            echo "Waiting for Android boot..."
 
-            echo "Searching for AAPT..."
+            timeout 180 bash -c '
+              until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ];
+              do
+                sleep 3
+              done
+            '
+
+            echo "Android boot completed."
+
+            echo "================================"
+            echo "INSTALLING APPLICATION"
+            echo "================================"
+
+            adb install -r "$APK"
+
+            echo "Installation successful."
+
+            echo "================================"
+            echo "DETECTING APPLICATION ID"
+            echo "================================"
 
             AAPT=$(find "$ANDROID_HOME/build-tools" \
               -type f -name aapt | sort -V | tail -n 1)
@@ -175,21 +124,14 @@ jobs:
             echo "Application ID: $PACKAGE_NAME"
 
             echo "================================"
-            echo "INSTALLING APPLICATION"
-            echo "================================"
-
-            adb install -r "$APK"
-
-            echo "Installation successful."
-
-            echo "================================"
             echo "LAUNCHING APPLICATION"
             echo "================================"
 
-            adb shell monkey -p "$PACKAGE_NAME" \
+            adb shell monkey \
+              -p "$PACKAGE_NAME" \
               -c android.intent.category.LAUNCHER 1
 
-            sleep 15
+            sleep 10
 
             echo "================================"
             echo "CHECKING APPLICATION PROCESS"
@@ -199,7 +141,9 @@ jobs:
 
             if [ -z "$APP_PID" ]; then
               echo "ERROR: Application process is not running."
-              adb logcat -d -t 1000 > emulator-logcat.txt
+
+              adb logcat -d -t 2000 > emulator-logcat.txt
+
               exit 1
             fi
 
@@ -210,15 +154,21 @@ jobs:
             echo "CHECKING FATAL EXCEPTIONS"
             echo "================================"
 
-            adb logcat -d --pid="$APP_PID" > app-logcat.txt
+            adb logcat -d > full-logcat.txt
 
-            if grep -q "FATAL EXCEPTION" app-logcat.txt; then
+            if grep -q "FATAL EXCEPTION" full-logcat.txt; then
               echo "ERROR: Fatal exception detected."
-              cat app-logcat.txt
+
+              grep -A 80 -B 10 "FATAL EXCEPTION" full-logcat.txt
+
               exit 1
             fi
 
             echo "No fatal exception detected."
+
+            echo "================================"
+            echo "CHECKING APPLICATION ACTIVITY"
+            echo "================================"
 
             adb shell dumpsys activity activities \
               > emulator-activities.txt
@@ -227,13 +177,13 @@ jobs:
             echo "EMULATOR TEST PASSED"
             echo "================================"
 
-      - name: Upload Emulator Logs
+      - name: Upload Test Logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: SmartShepherd-Emulator-Logs
+          name: SmartShepherd-Emulator-Test-Logs
           path: |
-            app-logcat.txt
+            full-logcat.txt
             emulator-logcat.txt
             emulator-activities.txt
           if-no-files-found: ignore
