@@ -1,3 +1,6 @@
+
+import java.net.URL
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -15,12 +18,18 @@ android {
         versionName = "0.2.0"
     }
 
-    buildFeatures { viewBinding = true }
+    buildFeatures {
+        viewBinding = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
 }
 
 dependencies {
@@ -30,6 +39,7 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.2.0")
 
     val cameraX = "1.4.1"
+
     implementation("androidx.camera:camera-core:$cameraX")
     implementation("androidx.camera:camera-camera2:$cameraX")
     implementation("androidx.camera:camera-lifecycle:$cameraX")
@@ -40,39 +50,68 @@ dependencies {
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
-    // TensorFlow Lite runtime aligned with the Task Vision 0.4.4 artifacts.
+    // TensorFlow Lite
     implementation("org.tensorflow:tensorflow-lite:2.13.0")
     implementation("org.tensorflow:tensorflow-lite-task-vision:0.4.4")
 }
 
-// Fetch the official EfficientDet-Lite0 COCO model before Android packaging.
-// The model includes the COCO "sheep" class and is used only for category detection.
+// ==========================================
+// DOWNLOAD SHEEP DETECTOR MODEL
+// ==========================================
+
 val downloadSheepDetectorModel by tasks.registering {
-    val modelFile = layout.projectDirectory.file("src/main/assets/sheep_detector.tflite")
+
+    val modelFile = layout.projectDirectory.file(
+        "src/main/assets/sheep_detector.tflite"
+    )
+
     outputs.file(modelFile)
+
     doLast {
         val destination = modelFile.asFile
+
         if (!destination.exists() || destination.length() < 1_000_000L) {
+
             destination.parentFile.mkdirs()
-            val temporary = destination.resolveSibling("${destination.name}.part")
-            val modelUrl = java.net.URL(
+
+            val temporary = destination.resolveSibling(
+                "${destination.name}.part"
+            )
+
+            val modelUrl = URL(
                 "https://tfhub.dev/tensorflow/lite-model/efficientdet/lite0/detection/metadata/1?lite-format=tflite"
             )
-            modelUrl.openConnection().apply {
-                connectTimeout = 30_000
-                readTimeout = 90_000
-            }.getInputStream().use { input ->
-                temporary.outputStream().use { output -> input.copyTo(output) }
+
+            val connection = modelUrl.openConnection()
+
+            connection.setConnectTimeout(30_000)
+            connection.setReadTimeout(90_000)
+
+            connection.getInputStream().use { input ->
+                temporary.outputStream().use { output ->
+                    input.copyTo(output)
+                }
             }
-            check(temporary.length() > 1_000_000L) {
-                "Downloaded TFLite model is unexpectedly small; refusing to package it."
+
+            check(temporary.exists() && temporary.length() > 1_000_000L) {
+                "Downloaded TFLite model is unexpectedly small."
             }
+
             check(temporary.renameTo(destination)) {
-                "Could not move the downloaded model into app/src/main/assets."
+                "Could not move model into app/src/main/assets."
             }
+
+            println("Sheep detector model downloaded successfully.")
+            println("Model size: ${destination.length()} bytes")
+        } else {
+            println("Sheep detector model already exists.")
         }
     }
 }
+
+// ==========================================
+// RUN MODEL DOWNLOAD BEFORE BUILD
+// ==========================================
 
 tasks.named("preBuild").configure {
     dependsOn(downloadSheepDetectorModel)
